@@ -5,6 +5,6 @@ prom:
     path: metrics
     pusher:
         enabled: true
-        intervalMS: 60000
+        intervalMS: 1000
         jobName: "user-job"
         remoteAddress: "127.0.0.1:9091"
