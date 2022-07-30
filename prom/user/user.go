@@ -1,4 +1,4 @@
-package notify
+package user
 
 import (
 	"context"
@@ -10,17 +10,45 @@ import (
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/prometheus/client_golang/prometheus"
+	rkprom "github.com/rookie-ninja/rk-prom"
 )
 
-const Topic string = "notify"
+var metricsSet *rkprom.MetricsSet
 
-const ConsumerGroup = "notify-consumer"
+type CounterName string
 
-type Message struct {
-	User string `json:"user"`
+const (
+	NewUser CounterName = "newuser"
+)
+
+var counterNames = [...]CounterName{NewUser}
+
+func Init(registerer prometheus.Registerer) {
+	metricsSet = rkprom.NewMetricsSet("dev", "user", registerer)
+
+	for _, c := range counterNames {
+		var err = metricsSet.RegisterCounter(string(c))
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	go Processor(context.Background())
 }
 
-// Processor 消息处理器
+func Report(c CounterName) {
+	metricsSet.GetCounterWithValues(string(c)).Inc()
+}
+
+const Topic string = "user"
+
+const ConsumerGroup = "user-consumer"
+
+type Message struct {
+	CounterName CounterName `json:"counter_name"`
+}
+
 func Processor(ctx context.Context) {
 	var c, err = consumer.CreateSubscriber(ConsumerGroup, []string{"127.0.0.1:9092"})
 	if err != nil {
@@ -40,7 +68,9 @@ func Processor(ctx context.Context) {
 		if err = json.Unmarshal(msg.Payload, &m); err != nil {
 			panic(err)
 		}
-		log.Printf("欢迎新用户：%s\n", m.User)
+
+		Report(m.CounterName)
+
 		msg.Ack()
 	}
 }
@@ -56,7 +86,6 @@ func InitPublish(hosts []string) {
 }
 
 func (m Message) Publish(ctx context.Context) (string, error) {
-
 	var (
 		data []byte
 		err  error

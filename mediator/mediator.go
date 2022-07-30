@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"log"
 
-	"github.com/ThreeDotsLabs/watermill"
-	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/go-baselib/new-user-task-with-event-driven/consumer"
 	"github.com/go-baselib/new-user-task-with-event-driven/notify"
-	"github.com/go-baselib/new-user-task-with-event-driven/producer"
+	"github.com/go-baselib/new-user-task-with-event-driven/prom/user"
+
+	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/go-baselib/postgresql-cdc/model"
 )
 
@@ -18,7 +18,12 @@ const Topic = "sample"
 const ConsumerGroup = "mediator-consumer"
 
 func Listen(ctx context.Context) {
-	var c, err = consumer.CreateSubscriber(ConsumerGroup, []string{"127.0.0.1:9092"})
+
+	var hosts = []string{"127.0.0.1:9092"}
+	notify.InitPublish(hosts)
+	user.InitPublish(hosts)
+
+	var c, err = consumer.CreateSubscriber(ConsumerGroup, hosts)
 	if err != nil {
 		panic(err)
 	}
@@ -41,7 +46,10 @@ func Listen(ctx context.Context) {
 			panic(err)
 		}
 
-		var nm = notify.Message{}
+		var (
+			nm = notify.Message{}
+			um = user.Message{}
+		)
 		for _, cg := range changes.Change {
 			if cg.Schema != "sample" || cg.Table != "user" || cg.Kind != "insert" {
 				continue
@@ -52,41 +60,32 @@ func Listen(ctx context.Context) {
 					continue
 				}
 				if len(cg.ColumnValues) > i {
-					nm.User, ok = cg.ColumnValues[i].(string)
+					var username string
+					username, ok = cg.ColumnValues[i].(string)
 					if !ok {
 						break
 					}
+					nm.User = username
+					um.CounterName = user.NewUser
 				}
 			}
 
 			if !ok {
 				continue
 			}
-			var data []byte
-			if data, err = json.Marshal(nm); err != nil {
+
+			var uuid string
+			if uuid, err = nm.Publish(ctx); err != nil {
 				panic(err)
 			}
-			// 投递任务到NotifyChannel
-			if err = NotifyEvent(ctx, data); err != nil {
+			log.Printf("notify event uuid:%s \n", uuid)
+
+			if uuid, err = um.Publish(ctx); err != nil {
 				panic(err)
 			}
+			log.Printf("user event uuid:%s \n", uuid)
 		}
 
 		msg.Ack()
 	}
-}
-
-func NotifyEvent(ctx context.Context, data []byte) error {
-	var publisher, err = producer.CreatePublisher([]string{"127.0.0.1:9092"})
-	if err != nil {
-		return err
-	}
-	err = publisher.Publish(notify.Topic, message.NewMessage(
-		watermill.NewUUID(), // internal uuid of the message, useful for debugging
-		data,
-	))
-	if err != nil {
-		return err
-	}
-	return nil
 }

@@ -1,0 +1,10 @@
+---
+prom:
+    enabled: true
+    port: 1608
+    path: metrics
+    pusher:
+        enabled: true
+        intervalMS: 60000
+        jobName: "user-job"
+        remoteAddress: "127.0.0.1:9091"
